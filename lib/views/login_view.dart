@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../controllers/login_controller.dart';
+import '../models/collector.dart';
 import '../models/login_credentials.dart';
 import 'qr_scanner_view.dart';
 
@@ -83,7 +84,7 @@ class _LoginViewState extends State<LoginView> {
       return;
     }
 
-    final collector = await Navigator.of(context).push(
+    final collector = await Navigator.of(context).push<Collector>(
       MaterialPageRoute(
         builder: (_) => QrScannerView(loginController: _controller),
       ),
