@@ -3,6 +3,7 @@
 import '../controllers/habitants_controller.dart';
 import '../models/app_user.dart';
 import '../models/payment_record.dart';
+import 'app_bottom_navigation.dart';
 import 'habitants_view.dart';
 import 'payment_history_view.dart';
 import 'statistics_view.dart';
@@ -53,6 +54,13 @@ class _CollectorDashboardViewState extends State<CollectorDashboardView> {
     Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => StatisticsView(user: widget.user)),
     );
+  }
+
+  Future<void> _openPayments(BuildContext context) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => PaymentHistoryView(user: widget.user)),
+    );
+    if (mounted) setState(() => _dashboardFuture = _loadDashboardData());
   }
 
   @override
@@ -165,7 +173,7 @@ class _CollectorDashboardViewState extends State<CollectorDashboardView> {
                                           icon: Icons.payments_outlined,
                                           label: 'Nouveau\nPaiement',
                                           color: _gold,
-                                          onTap: () => _openHabitants(context),
+                                          onTap: () => _openPayments(context),
                                         ),
                                         _ActionTile(
                                           icon: Icons.groups_2_outlined,
@@ -193,7 +201,7 @@ class _CollectorDashboardViewState extends State<CollectorDashboardView> {
                           ),
                         ),
                       ),
-                      _BottomNavigation(user: widget.user),
+                      AppBottomNavigation(currentIndex: 0, user: widget.user),
                     ],
                   ),
                 ),
@@ -553,96 +561,6 @@ class _ActionTile extends StatelessWidget {
                   fontWeight: FontWeight.w900,
                   height: 1.15,
                 ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _BottomNavigation extends StatelessWidget {
-  const _BottomNavigation({required this.user});
-
-  final AppUser user;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      height: 68,
-      color: Colors.white,
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceAround,
-        children: [
-          const _NavItem(
-            icon: Icons.home_outlined,
-            label: 'Accueil',
-            isActive: true,
-          ),
-          _NavItem(
-            icon: Icons.groups_2_outlined,
-            label: 'Habitants',
-            onTap: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => HabitantsView(user: user)),
-            ),
-          ),
-          _NavItem(
-            icon: Icons.credit_card_outlined,
-            label: 'Paiements',
-            onTap: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => PaymentHistoryView(user: user)),
-            ),
-          ),
-          _NavItem(
-            icon: Icons.bar_chart_rounded,
-            label: 'Stats',
-            onTap: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => StatisticsView(user: user)),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _NavItem extends StatelessWidget {
-  const _NavItem({
-    required this.icon,
-    required this.label,
-    this.isActive = false,
-    this.onTap,
-  });
-
-  final IconData icon;
-  final String label;
-  final bool isActive;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final color = isActive
-        ? _CollectorDashboardViewState._gold
-        : const Color(0xFF748092);
-
-    return GestureDetector(
-      onTap: onTap,
-      child: SizedBox(
-        width: 72,
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, size: 18, color: color),
-            const SizedBox(height: 4),
-            Text(
-              label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: color,
-                fontSize: 9,
-                fontWeight: FontWeight.w800,
               ),
             ),
           ],

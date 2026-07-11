@@ -5,6 +5,7 @@ import '../controllers/habitants_controller.dart';
 import '../models/app_user.dart';
 import '../models/payment_record.dart';
 import '../services/firestore_service.dart';
+import 'receipt_view.dart';
 
 class HabitantDetailView extends StatefulWidget {
   const HabitantDetailView({
@@ -12,11 +13,13 @@ class HabitantDetailView extends StatefulWidget {
     required this.habitant,
     required this.paymentHistory,
     this.onPayNow,
+    this.collector,
   });
 
   final AppUser habitant;
   final List<PaymentRecord> paymentHistory;
   final Future<void> Function()? onPayNow;
+  final AppUser? collector;
 
   static const Color _navy = Color(0xFF172747);
   static const Color _gold = Color(0xFFF5A817);
@@ -28,11 +31,15 @@ class HabitantDetailView extends StatefulWidget {
 
 class _HabitantDetailViewState extends State<HabitantDetailView> {
   final _controller = HabitantsController();
-  late Future<List<PaymentRecord>> _history = Future.value(
-    widget.paymentHistory,
-  );
+  late Future<List<PaymentRecord>> _history;
   bool _isPaying = false;
   StreamSubscription<void>? _changesSub;
+
+  void _refreshHistory() {
+    setState(
+      () => _history = _controller.fetchPaymentHistory(widget.habitant.id),
+    );
+  }
 
   Future<void> _payNow() async {
     if (_isPaying || widget.onPayNow == null) return;
@@ -40,24 +47,53 @@ class _HabitantDetailViewState extends State<HabitantDetailView> {
     try {
       await widget.onPayNow!();
       if (mounted) {
-        setState(
-          () => _history = _controller.fetchPaymentHistory(widget.habitant.id),
-        );
+        _refreshHistory();
       }
     } finally {
       if (mounted) setState(() => _isPaying = false);
     }
   }
 
+  void _openReceipt(PaymentRecord payment) {
+    if (!payment.isPaid) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Le reçu est disponible après validation du paiement.')),
+      );
+      return;
+    }
+    final collector = widget.collector ??
+        AppUser(
+          id: payment.collectorId ?? '',
+          fullName: payment.collectorId ?? 'Collecteur non renseigné',
+          email: '',
+          type: AppUserType.collecteur,
+          isActive: true,
+        );
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ReceiptView(
+          habitant: widget.habitant,
+          collector: collector,
+          payment: payment,
+        ),
+      ),
+    );
+  }
+
   @override
   void initState() {
     super.initState();
+    // Toujours récupérer l'historique courant à l'ouverture du détail.
+    _history = _controller.fetchPaymentHistory(widget.habitant.id);
     _changesSub = FirestoreService.changes.listen((_) {
-      if (mounted)
-        setState(
-          () => _history = _controller.fetchPaymentHistory(widget.habitant.id),
-        );
+      if (mounted) _refreshHistory();
     });
+  }
+
+  @override
+  void didUpdateWidget(covariant HabitantDetailView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.habitant.id != widget.habitant.id) _refreshHistory();
   }
 
   @override
@@ -151,7 +187,12 @@ class _HabitantDetailViewState extends State<HabitantDetailView> {
                               if (paymentHistory.isEmpty)
                                 const _EmptyHistory()
                               else
-                                ...paymentHistory.map(_PaymentHistoryTile.new),
+                                ...paymentHistory.map(
+                                  (payment) => _PaymentHistoryTile(
+                                    payment,
+                                    onTap: () => _openReceipt(payment),
+                                  ),
+                                ),
                             ],
                           ),
                         ),
@@ -399,21 +440,25 @@ class _InfoRow extends StatelessWidget {
 }
 
 class _PaymentHistoryTile extends StatelessWidget {
-  const _PaymentHistoryTile(this.payment);
+  const _PaymentHistoryTile(this.payment, {required this.onTap});
 
   final PaymentRecord payment;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final badge = _PaymentBadgeData.fromStatus(payment.status);
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(13),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: Row(
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(14),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 10),
+        padding: const EdgeInsets.all(13),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Row(
         children: [
           Container(
             width: 34,
@@ -483,6 +528,7 @@ class _PaymentHistoryTile extends StatelessWidget {
             ],
           ),
         ],
+        ),
       ),
     );
   }

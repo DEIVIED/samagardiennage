@@ -27,6 +27,17 @@ class PaymentRecord {
 
   bool get isPaid => status.toLowerCase() == 'paye';
 
+  /// Identifiant stable d'une cotisation : un habitant ne peut avoir qu'un
+  /// seul paiement pour le même mois et la même année.
+  static String periodDocumentId({
+    required String habitantId,
+    required int month,
+    required int year,
+  }) {
+    final safeHabitantId = Uri.encodeComponent(habitantId.trim());
+    return 'payment_${safeHabitantId}_${year}_${month.toString().padLeft(2, '0')}';
+  }
+
   String get periodLabel => '${monthName(month)} $year';
 
   static String monthName(int month) {

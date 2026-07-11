@@ -5,6 +5,7 @@ import '../controllers/habitants_controller.dart';
 import '../models/app_user.dart';
 import '../models/payment_record.dart';
 import '../services/firestore_service.dart';
+import 'app_bottom_navigation.dart';
 import 'collector_dashboard_view.dart';
 import 'habitant_detail_view.dart';
 import 'habitant_creation_view.dart';
@@ -134,16 +135,21 @@ class _HabitantsViewState extends State<HabitantsView> {
     _openPayment(habitant, history);
   }
 
-  void _openDetail(AppUser habitant, List<PaymentRecord> history) {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => HabitantDetailView(
-          habitant: habitant,
-          paymentHistory: history,
-          onPayNow: widget.user != null ? () => _openPayment(habitant) : null,
+  Future<void> _openDetail(AppUser habitant, List<PaymentRecord> history) async {
+    try {
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => HabitantDetailView(
+            habitant: habitant,
+            paymentHistory: history,
+            collector: widget.user,
+            onPayNow: widget.user != null ? () => _openPayment(habitant) : null,
+          ),
         ),
-      ),
-    );
+      );
+    } finally {
+      if (mounted) setState(() => _pageDataFuture = _loadPageData());
+    }
   }
 
   Future<void> _openCreateHabitant() async {
@@ -255,7 +261,7 @@ class _HabitantsViewState extends State<HabitantsView> {
                       },
                     ),
                   ),
-                  _BottomNavigation(user: widget.user),
+                  AppBottomNavigation(currentIndex: 1, user: widget.user),
                 ],
               ),
             ),
@@ -681,102 +687,5 @@ class _HabitantsPageData {
     final history = historyByHabitant[habitantId];
     if (history == null || history.isEmpty) return null;
     return history.first;
-  }
-}
-
-class _BottomNavigation extends StatelessWidget {
-  const _BottomNavigation({this.user});
-
-  final AppUser? user;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      height: 68,
-      color: Colors.white,
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceAround,
-        children: [
-          _NavItem(
-            icon: Icons.home_outlined,
-            label: 'Accueil',
-            onTap: () {
-              if (user != null) {
-                Navigator.of(context).pushReplacement(
-                  MaterialPageRoute(
-                    builder: (_) => CollectorDashboardView(user: user!),
-                  ),
-                );
-              } else {
-                Navigator.of(context).pop();
-              }
-            },
-          ),
-          const _NavItem(
-            icon: Icons.groups_2_outlined,
-            label: 'Habitants',
-            isActive: true,
-          ),
-          _NavItem(
-            icon: Icons.credit_card_outlined,
-            label: 'Paiements',
-            onTap: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => PaymentHistoryView(user: user)),
-            ),
-          ),
-          _NavItem(
-            icon: Icons.bar_chart_rounded,
-            label: 'Stats',
-            onTap: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => StatisticsView(user: user)),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _NavItem extends StatelessWidget {
-  const _NavItem({
-    required this.icon,
-    required this.label,
-    this.isActive = false,
-    this.onTap,
-  });
-
-  final IconData icon;
-  final String label;
-  final bool isActive;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final color = isActive
-        ? _HabitantsViewState._gold
-        : const Color(0xFF748092);
-    return GestureDetector(
-      onTap: onTap,
-      child: SizedBox(
-        width: 72,
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, size: 18, color: color),
-            const SizedBox(height: 4),
-            Text(
-              label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: color,
-                fontSize: 9,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
   }
 }

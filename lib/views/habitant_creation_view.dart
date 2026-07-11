@@ -33,9 +33,8 @@ class _HabitantCreationViewState extends State<HabitantCreationView> {
 
   Future<void> _save() async {
     if (_saving || !_formKey.currentState!.validate()) return;
-    final timestamp = DateTime.now().millisecondsSinceEpoch;
-    final normalizedName = _name.text.trim().toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '_');
-    final id = 'habitant_${normalizedName}_$timestamp';
+    final timestamp = DateTime.now().microsecondsSinceEpoch.toString();
+    final id = timestamp;
     final habitant = AppUser(
       id: id,
       fullName: _name.text.trim(),
@@ -78,18 +77,39 @@ class _HabitantCreationViewState extends State<HabitantCreationView> {
           child: ListView(
             padding: const EdgeInsets.all(20),
             children: [
-              const Text('Informations de l’habitant', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 18, color: _navy)),
+              const Text(
+                'Informations de l’habitant',
+                style: TextStyle(
+                  fontWeight: FontWeight.w900,
+                  fontSize: 18,
+                  color: _navy,
+                ),
+              ),
               const SizedBox(height: 18),
               _field(_name, 'Nom complet', required: true),
-              _field(_phone, 'Téléphone', keyboard: TextInputType.phone, required: true),
+              _field(
+                _phone,
+                'Téléphone',
+                keyboard: TextInputType.phone,
+                required: true,
+              ),
               _field(_email, 'E-mail', keyboard: TextInputType.emailAddress),
               _field(_address, 'Adresse', required: true),
               _field(_quartier, 'Quartier', required: true),
               const SizedBox(height: 22),
               FilledButton.icon(
                 onPressed: _saving ? null : _save,
-                style: FilledButton.styleFrom(backgroundColor: _gold, foregroundColor: _navy, padding: const EdgeInsets.symmetric(vertical: 15)),
-                icon: _saving ? const SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.person_add_alt_1),
+                style: FilledButton.styleFrom(
+                  backgroundColor: _gold,
+                  foregroundColor: _navy,
+                  padding: const EdgeInsets.symmetric(vertical: 15),
+                ),
+                icon: _saving
+                    ? const SizedBox.square(
+                        dimension: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.person_add_alt_1),
                 label: Text(_saving ? 'Enregistrement...' : 'Créer l’habitant'),
               ),
             ],
@@ -99,14 +119,31 @@ class _HabitantCreationViewState extends State<HabitantCreationView> {
     );
   }
 
-  Widget _field(TextEditingController controller, String label, {TextInputType? keyboard, bool required = false}) {
+  Widget _field(
+    TextEditingController controller,
+    String label, {
+    TextInputType? keyboard,
+    bool required = false,
+  }) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 14),
       child: TextFormField(
         controller: controller,
         keyboardType: keyboard,
-        validator: required ? (value) => value == null || value.trim().isEmpty ? '$label obligatoire' : null : null,
-        decoration: InputDecoration(labelText: label, filled: true, fillColor: Colors.white, border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none)),
+        validator: required
+            ? (value) => value == null || value.trim().isEmpty
+                  ? '$label obligatoire'
+                  : null
+            : null,
+        decoration: InputDecoration(
+          labelText: label,
+          filled: true,
+          fillColor: Colors.white,
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide.none,
+          ),
+        ),
       ),
     );
   }

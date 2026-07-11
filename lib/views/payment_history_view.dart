@@ -5,8 +5,12 @@ import '../controllers/habitants_controller.dart';
 import '../models/app_user.dart';
 import '../models/payment_record.dart';
 import '../services/firestore_service.dart';
+import 'app_bottom_navigation.dart';
 import 'collector_dashboard_view.dart';
+import 'habitant_qr_scanner_view.dart';
 import 'habitants_view.dart';
+import 'payment_view.dart';
+import 'receipt_view.dart';
 import 'statistics_view.dart';
 
 enum PaymentFilter { all, paid, partial, unpaid }
@@ -43,6 +47,70 @@ class _PaymentHistoryViewState extends State<PaymentHistoryView> {
   }
 
   void _reload() => setState(() => _data = _load());
+
+  Future<void> _scanAndPay() async {
+    final collector = widget.user;
+    if (collector == null) return;
+
+    final habitant = await Navigator.of(context).push<AppUser>(
+      MaterialPageRoute(
+        builder: (_) => HabitantQrScannerView(controller: _controller),
+      ),
+    );
+    if (!mounted || habitant == null) return;
+
+    final history = await _controller.fetchPaymentHistory(habitant.id);
+    if (!mounted) return;
+    final payment = await Navigator.of(context).push<PaymentRecord>(
+      MaterialPageRoute(
+        builder: (_) => PaymentView(
+          habitant: habitant,
+          collector: collector,
+          paymentHistory: history,
+          onPaymentConfirmed: _controller.savePayment,
+        ),
+      ),
+    );
+    if (!mounted || payment == null) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ReceiptView(
+          habitant: habitant,
+          collector: collector,
+          payment: payment,
+        ),
+      ),
+    );
+    if (mounted) _reload();
+  }
+
+  void _openReceipt(PaymentRecord payment, _PaymentPageData data) {
+    if (!payment.isPaid) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Le reçu est disponible après validation du paiement.')),
+      );
+      return;
+    }
+    final habitant = data.habitant(payment.habitantId);
+    if (habitant == null) return;
+    final collector = widget.user ??
+        AppUser(
+          id: payment.collectorId ?? '',
+          fullName: payment.collectorId ?? 'Collecteur non renseigné',
+          email: '',
+          type: AppUserType.collecteur,
+          isActive: true,
+        );
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ReceiptView(
+          habitant: habitant,
+          collector: collector,
+          payment: payment,
+        ),
+      ),
+    );
+  }
 
   List<PaymentRecord> _filtered(_PaymentPageData data) {
     return data.payments.where((payment) {
@@ -122,6 +190,7 @@ class _PaymentHistoryViewState extends State<PaymentHistoryView> {
                         itemBuilder: (_, index) => _PaymentTile(
                           payment: payments[index],
                           name: data.habitantName(payments[index].habitantId),
+                          onTap: () => _openReceipt(payments[index], data),
                         ),
                       ),
               ),
@@ -130,6 +199,14 @@ class _PaymentHistoryViewState extends State<PaymentHistoryView> {
         },
       ),
       bottomNavigationBar: _PaymentNav(user: widget.user),
+      floatingActionButton: FloatingActionButton.extended(
+        heroTag: 'scan-payment-habitant',
+        backgroundColor: _gold,
+        foregroundColor: _navy,
+        onPressed: widget.user == null ? null : _scanAndPay,
+        icon: const Icon(Icons.qr_code_scanner_rounded),
+        label: const Text('Scanner'),
+      ),
     );
   }
 
@@ -315,12 +392,24 @@ class _PaymentPageData {
     }
     return 'Habitant inconnu';
   }
+
+  AppUser? habitant(String id) {
+    for (final habitant in habitants) {
+      if (habitant.id == id) return habitant;
+    }
+    return null;
+  }
 }
 
 class _PaymentTile extends StatelessWidget {
-  const _PaymentTile({required this.payment, required this.name});
+  const _PaymentTile({
+    required this.payment,
+    required this.name,
+    required this.onTap,
+  });
   final PaymentRecord payment;
   final String name;
+  final VoidCallback onTap;
   @override
   Widget build(BuildContext context) {
     final color = payment.status == 'paye'
@@ -328,13 +417,16 @@ class _PaymentTile extends StatelessWidget {
         : payment.status == 'partiel'
         ? const Color(0xFFF5A817)
         : const Color(0xFFD2473F);
-    return Container(
-      padding: const EdgeInsets.all(13),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: Row(
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(14),
+      child: Container(
+        padding: const EdgeInsets.all(13),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Row(
         children: [
           CircleAvatar(
             backgroundColor: color.withValues(alpha: .15),
@@ -379,6 +471,7 @@ class _PaymentTile extends StatelessWidget {
             ),
           ),
         ],
+        ),
       ),
     );
   }
@@ -388,43 +481,6 @@ class _PaymentNav extends StatelessWidget {
   const _PaymentNav({this.user});
   final AppUser? user;
   @override
-  Widget build(BuildContext context) => BottomNavigationBar(
-    type: BottomNavigationBarType.fixed,
-    currentIndex: 2,
-    selectedItemColor: const Color(0xFFF5A817),
-    items: const [
-      BottomNavigationBarItem(
-        icon: Icon(Icons.home_outlined),
-        label: 'Accueil',
-      ),
-      BottomNavigationBarItem(
-        icon: Icon(Icons.groups_2_outlined),
-        label: 'Habitants',
-      ),
-      BottomNavigationBarItem(
-        icon: Icon(Icons.credit_card_outlined),
-        label: 'Paiements',
-      ),
-      BottomNavigationBarItem(
-        icon: Icon(Icons.bar_chart_rounded),
-        label: 'Stats',
-      ),
-    ],
-    onTap: (index) {
-      if (index == 0 && user != null)
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(
-            builder: (_) => CollectorDashboardView(user: user!),
-          ),
-        );
-      if (index == 1)
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (_) => HabitantsView(user: user)),
-        );
-      if (index == 3)
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (_) => StatisticsView(user: user)),
-        );
-    },
-  );
+  Widget build(BuildContext context) =>
+      AppBottomNavigation(currentIndex: 2, user: user);
 }

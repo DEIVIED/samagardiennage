@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../models/app_user.dart';
 import '../models/payment_record.dart';
@@ -24,6 +25,11 @@ class ReceiptView extends StatelessWidget {
         foregroundColor: Colors.white,
         title: const Text('Reçu de paiement'),
         actions: [
+          IconButton(
+            tooltip: 'Partager par WhatsApp',
+            onPressed: () => _shareOnWhatsApp(context),
+            icon: const Icon(Icons.share_outlined),
+          ),
           TextButton.icon(
             onPressed: () {},
             icon: const Icon(Icons.picture_as_pdf, color: Colors.white),
@@ -97,7 +103,7 @@ class ReceiptView extends StatelessWidget {
                         borderRadius: BorderRadius.circular(14),
                       ),
                     ),
-                    onPressed: () => Navigator.of(context).pop(),
+                    onPressed: () => _shareOnWhatsApp(context),
                     child: const Text('Partager le reçu'),
                   ),
                 ],
@@ -111,6 +117,29 @@ class ReceiptView extends StatelessWidget {
 
   String _formatDate(DateTime date) {
     return '${date.day.toString().padLeft(2, '0')} ${_monthName(date.month)} ${date.year} - ${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
+  }
+
+  Future<void> _shareOnWhatsApp(BuildContext context) async {
+    final receiptNumber = payment.receiptNumber ?? payment.id;
+    final message = '''Reçu de paiement Sama Gardiennage
+N° reçu : $receiptNumber
+Habitant : ${habitant.fullName}
+Période : ${payment.periodLabel}
+Montant : ${payment.amount} F CFA
+Date : ${_formatDate(payment.paidAt ?? DateTime.now())}
+Collecteur : ${collector.fullName}''';
+    final whatsappUrl = Uri.https('wa.me', '/', {'text': message});
+    final opened = await launchUrl(
+      whatsappUrl,
+      mode: LaunchMode.externalApplication,
+    );
+    if (!opened && context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('WhatsApp est indisponible sur cet appareil.'),
+        ),
+      );
+    }
   }
 
   static String _monthName(int month) {

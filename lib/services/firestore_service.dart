@@ -6,6 +6,14 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/app_user.dart';
 import '../models/payment_record.dart';
 
+/// Levée lorsqu'une cotisation existe déjà pour l'habitant et la période.
+class DuplicatePaymentException implements Exception {
+  const DuplicatePaymentException();
+
+  @override
+  String toString() => 'Cette période est déjà payée.';
+}
+
 class FirestoreService {
   FirestoreService({FirebaseAuth? auth, FirebaseFirestore? firestore})
     : _authOverride = auth,
@@ -159,88 +167,6 @@ class FirestoreService {
       }, SetOptions(merge: true));
     }
 
-    final payments = <PaymentRecord>[
-      PaymentRecord(
-        id: 'payment_habitant_amadou_juillet',
-        habitantId: 'habitant_amadou_diallo',
-        amount: 2000,
-        month: 7,
-        year: 2026,
-        status: 'paye',
-        paidAt: DateTime(2026, 7, 2),
-        collectorId: 'collecteur_moussa_camara',
-        receiptNumber: 'REC-2026-0001',
-      ),
-      PaymentRecord(
-        id: 'payment_habitant_amadou_juin',
-        habitantId: 'habitant_amadou_diallo',
-        amount: 2000,
-        month: 6,
-        year: 2026,
-        status: 'paye',
-        paidAt: DateTime(2026, 6, 3),
-        collectorId: 'collecteur_moussa_camara',
-        receiptNumber: 'REC-2026-0002',
-      ),
-      const PaymentRecord(
-        id: 'payment_habitant_fatou_juillet',
-        habitantId: 'habitant_fatou_ndiaye',
-        amount: 2000,
-        month: 7,
-        year: 2026,
-        status: 'impaye',
-      ),
-      PaymentRecord(
-        id: 'payment_habitant_ibrahima_juillet',
-        habitantId: 'habitant_ibrahima_sow',
-        amount: 2000,
-        month: 7,
-        year: 2026,
-        status: 'paye',
-        paidAt: DateTime(2026, 7, 5),
-        collectorId: 'collecteur_moussa_camara',
-        receiptNumber: 'REC-2026-0003',
-      ),
-      const PaymentRecord(
-        id: 'payment_habitant_mariama_juillet',
-        habitantId: 'habitant_mariama_bah',
-        amount: 2000,
-        month: 7,
-        year: 2026,
-        status: 'impaye',
-      ),
-      PaymentRecord(
-        id: 'payment_habitant_ousmane_juillet',
-        habitantId: 'habitant_ousmane_sarr',
-        amount: 2000,
-        month: 7,
-        year: 2026,
-        status: 'impaye',
-        paidAt: DateTime(2026, 7, 6),
-        collectorId: 'collecteur_moussa_camara',
-        receiptNumber: 'REC-2026-0004',
-      ),
-      PaymentRecord(
-        id: 'payment_habitant_aissatou_juillet',
-        habitantId: 'habitant_aissatou_diop',
-        amount: 2000,
-        month: 7,
-        year: 2026,
-        status: 'paye',
-        paidAt: DateTime(2026, 7, 7),
-        collectorId: 'collecteur_moussa_camara',
-        receiptNumber: 'REC-2026-0005',
-      ),
-    ];
-
-    for (final payment in payments) {
-      batch.set(
-        _firestore.collection(_paymentCollection).doc(payment.id),
-        {...payment.toFirestore(), 'seededAt': FieldValue.serverTimestamp()},
-        SetOptions(merge: true),
-      );
-    }
-
     await batch.commit();
   }
 
@@ -249,10 +175,50 @@ class FirestoreService {
   }
 
   Future<void> _savePaymentInternal(PaymentRecord payment) async {
-    await _firestore.collection(_paymentCollection).doc(payment.id).set({
-      ...payment.toFirestore(),
-      'createdAt': FieldValue.serverTimestamp(),
-    }, SetOptions(merge: true));
+    final paymentId = PaymentRecord.periodDocumentId(
+      habitantId: payment.habitantId,
+      month: payment.month,
+      year: payment.year,
+    );
+    final paymentRef = _firestore.collection(_paymentCollection).doc(paymentId);
+
+    // Compatibilité avec les anciens reçus, créés avant l'identifiant stable.
+    // Ils doivent également empêcher un second encaissement de la période.
+    final residentPayments = await _firestore
+        .collection(_paymentCollection)
+        .where('habitantId', isEqualTo: payment.habitantId)
+        .get();
+    final hasLegacyPaidPayment = residentPayments.docs.any((document) {
+      final existingPayment = PaymentRecord.fromFirestore(
+        document.id,
+        document.data(),
+      );
+      return document.id != paymentId &&
+          existingPayment.year == payment.year &&
+          existingPayment.month == payment.month &&
+          existingPayment.isPaid;
+    });
+    if (hasLegacyPaidPayment) {
+      throw const DuplicatePaymentException();
+    }
+
+    // Le document est identifié par habitant + année + mois. La transaction
+    // protège aussi les doubles validations provenant de deux écrans ouverts.
+    await _firestore.runTransaction((transaction) async {
+      final existing = await transaction.get(paymentRef);
+      if (existing.exists) {
+        final data = existing.data();
+        if ((data?['status'] ?? '').toString().trim().toLowerCase() == 'paye') {
+          throw const DuplicatePaymentException();
+        }
+      }
+
+      transaction.set(paymentRef, {
+        ...payment.toFirestore(),
+        'paymentId': paymentId,
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+    });
     // Notify listeners that data changed (e.g., a payment was recorded).
     try {
       _changesController.add(null);
@@ -330,7 +296,7 @@ class FirestoreService {
         .collection('users')
         .where('type', isEqualTo: AppUserType.habitant.value)
         .where('isActive', isEqualTo: true)
-        .get();
+        .get(const GetOptions(source: Source.server));
 
     final habitants = snapshot.docs
         .map((doc) => AppUser.fromFirestore(doc.id, doc.data()))
@@ -343,16 +309,23 @@ class FirestoreService {
     final snapshot = await _firestore
         .collection(_paymentCollection)
         .where('habitantId', isEqualTo: habitantId)
-        .get();
+        .get(const GetOptions(source: Source.server));
 
     final payments = snapshot.docs
         .map((doc) => PaymentRecord.fromFirestore(doc.id, doc.data()))
         .toList();
     payments.sort((a, b) {
+      final periodA = a.year * 100 + a.month;
+      final periodB = b.year * 100 + b.month;
+      final periodComparison = periodB.compareTo(periodA);
+      if (periodComparison != 0) return periodComparison;
       final aDate = a.paidAt ?? DateTime(1900);
       final bDate = b.paidAt ?? DateTime(1900);
       return bDate.compareTo(aDate);
     });
+    print(
+      'Fetched ${payments.length} payment records for habitant $habitantId',
+    );
     return payments;
   }
 
@@ -360,9 +333,15 @@ class FirestoreService {
     final snapshot = await _firestore
         .collection(_paymentCollection)
         .where('year', isEqualTo: year)
-        .get();
-    return snapshot.docs
+        .get(const GetOptions(source: Source.server));
+    final payments = snapshot.docs
         .map((doc) => PaymentRecord.fromFirestore(doc.id, doc.data()))
         .toList();
+    payments.sort((a, b) {
+      final periodA = a.year * 100 + a.month;
+      final periodB = b.year * 100 + b.month;
+      return periodB.compareTo(periodA);
+    });
+    return payments;
   }
 }

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/app_user.dart';
 import '../models/payment_record.dart';
+import '../services/firestore_service.dart';
 
 class PaymentView extends StatefulWidget {
   const PaymentView({
@@ -24,14 +25,14 @@ class _PaymentViewState extends State<PaymentView> {
   static const _gold = Color(0xFFF5A817);
   static const int _monthlyAmount = 2000;
   late final List<_PaymentPeriod> _unpaidPeriods;
-  late _PaymentPeriod _selectedPeriod;
+  _PaymentPeriod? _selectedPeriod;
   bool _isSubmitting = false;
 
   @override
   void initState() {
     super.initState();
     _unpaidPeriods = _findUnpaidPeriods(widget.paymentHistory);
-    _selectedPeriod = _unpaidPeriods.first;
+    if (_unpaidPeriods.isNotEmpty) _selectedPeriod = _unpaidPeriods.first;
   }
 
   List<_PaymentPeriod> _findUnpaidPeriods(List<PaymentRecord> history) {
@@ -54,7 +55,7 @@ class _PaymentViewState extends State<PaymentView> {
     for (var month = 1; month <= now.month; month++) {
       final key = '${now.year}-$month';
       if (!paidKeys.contains(key)) {
-        periods.add(_PaymentPeriod(month, now.year, outstandingByKey[key]?.id));
+        periods.add(_PaymentPeriod(month, now.year));
       }
     }
     // Les impayés des années précédentes restent également payables.
@@ -69,7 +70,7 @@ class _PaymentViewState extends State<PaymentView> {
           (period) =>
               period.year == payment.year && period.month == payment.month,
         )) {
-          periods.add(_PaymentPeriod(payment.month, payment.year, payment.id));
+          periods.add(_PaymentPeriod(payment.month, payment.year));
         }
       }
     }
@@ -77,18 +78,43 @@ class _PaymentViewState extends State<PaymentView> {
     return periods;
   }
 
+  bool _isSelectedMonthAlreadyPaid() {
+    final selectedPeriod = _selectedPeriod;
+    if (selectedPeriod == null) return false;
+    final selectedKey = '${selectedPeriod.year}-${selectedPeriod.month}';
+    return widget.paymentHistory.any((payment) {
+      final status = payment.status.trim().toLowerCase();
+      return status == 'paye' &&
+          '${payment.year}-${payment.month}' == selectedKey;
+    });
+  }
+
   Future<void> _submit() async {
-    if (_isSubmitting) return;
+    final selectedPeriod = _selectedPeriod;
+    if (_isSubmitting || selectedPeriod == null) return;
+    if (_isSelectedMonthAlreadyPaid()) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Ce mois est déjà payé. Veuillez sélectionner un autre mois.',
+          ),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
     final now = DateTime.now();
     final payment = PaymentRecord(
       // Une ancienne fiche impayée est réutilisée afin d'éviter un doublon.
-      id:
-          _selectedPeriod.existingId ??
-          'payment_${widget.habitant.id}_${_selectedPeriod.year}_${_selectedPeriod.month}',
+      id: PaymentRecord.periodDocumentId(
+        habitantId: widget.habitant.id,
+        month: selectedPeriod.month,
+        year: selectedPeriod.year,
+      ),
       habitantId: widget.habitant.id,
       amount: _monthlyAmount,
-      month: _selectedPeriod.month,
-      year: _selectedPeriod.year,
+      month: selectedPeriod.month,
+      year: selectedPeriod.year,
       status: 'paye',
       paidAt: now,
       collectorId: widget.collector.id,
@@ -100,6 +126,15 @@ class _PaymentViewState extends State<PaymentView> {
       if (mounted) {
         Navigator.of(context).pop(payment);
       }
+    } on DuplicatePaymentException {
+      if (!mounted) return;
+      setState(() => _isSubmitting = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Ce mois est déjà payé et ne peut plus être encaissé.'),
+          backgroundColor: Colors.red,
+        ),
+      );
     } catch (_) {
       if (mounted) setState(() => _isSubmitting = false);
       rethrow;
@@ -163,7 +198,13 @@ class _PaymentViewState extends State<PaymentView> {
             style: TextStyle(fontWeight: FontWeight.w900, color: _navy),
           ),
           const SizedBox(height: 8),
-          DropdownButtonFormField<_PaymentPeriod>(
+          if (_unpaidPeriods.isEmpty)
+            const Text(
+              'Aucune échéance impayée à encaisser.',
+              style: TextStyle(color: Color(0xFF2E8B57)),
+            )
+          else
+            DropdownButtonFormField<_PaymentPeriod>(
             value: _selectedPeriod,
             decoration: InputDecoration(
               labelText: 'Mois et année',
@@ -185,7 +226,23 @@ class _PaymentViewState extends State<PaymentView> {
                 )
                 .toList(),
             onChanged: (period) {
-              if (period != null) setState(() => _selectedPeriod = period);
+              if (period != null) {
+                if (widget.paymentHistory.any((payment) {
+                  final status = payment.status.trim().toLowerCase();
+                  return status == 'paye' &&
+                      payment.year == period.year &&
+                      payment.month == period.month;
+                })) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Ce mois est déjà payé.'),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                } else {
+                  setState(() => _selectedPeriod = period);
+                }
+              }
             },
           ),
           const SizedBox(height: 8),
@@ -195,7 +252,7 @@ class _PaymentViewState extends State<PaymentView> {
           ),
           const SizedBox(height: 28),
           FilledButton.icon(
-            onPressed: _isSubmitting ? null : _submit,
+            onPressed: _isSubmitting || _selectedPeriod == null ? null : _submit,
             style: FilledButton.styleFrom(
               backgroundColor: _gold,
               foregroundColor: _navy,
@@ -218,10 +275,9 @@ class _PaymentViewState extends State<PaymentView> {
 }
 
 class _PaymentPeriod implements Comparable<_PaymentPeriod> {
-  const _PaymentPeriod(this.month, this.year, [this.existingId]);
+  const _PaymentPeriod(this.month, this.year);
   final int month;
   final int year;
-  final String? existingId;
   @override
   int compareTo(_PaymentPeriod other) => year == other.year
       ? month.compareTo(other.month)

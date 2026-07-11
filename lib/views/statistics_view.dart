@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../controllers/habitants_controller.dart';
 import '../models/app_user.dart';
 import '../models/payment_record.dart';
+import 'app_bottom_navigation.dart';
 
 class StatisticsView extends StatefulWidget {
   const StatisticsView({super.key, this.user});
@@ -69,6 +70,7 @@ class _StatisticsViewState extends State<StatisticsView> {
           ]);
         },
       ),
+      bottomNavigationBar: AppBottomNavigation(currentIndex: 3, user: widget.user),
     );
   }
 
