@@ -1,8 +1,8 @@
 class LoginCredentials {
-  const LoginCredentials({required this.email, required this.password});
+  const LoginCredentials({required this.email, required this.pin});
 
   final String email;
-  final String password;
+  final String pin;
 
-  bool get isValid => email.trim().isNotEmpty && password.isNotEmpty;
+  bool get isValid => email.trim().isNotEmpty && pin.trim().isNotEmpty;
 }

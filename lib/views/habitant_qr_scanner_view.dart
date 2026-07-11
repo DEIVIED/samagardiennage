@@ -1,19 +1,19 @@
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
-import '../controllers/login_controller.dart';
+import '../controllers/habitants_controller.dart';
 import '../models/app_user.dart';
 
-class QrScannerView extends StatefulWidget {
-  const QrScannerView({super.key, required this.loginController});
+class HabitantQrScannerView extends StatefulWidget {
+  const HabitantQrScannerView({super.key, required this.controller});
 
-  final LoginController loginController;
+  final HabitantsController controller;
 
   @override
-  State<QrScannerView> createState() => _QrScannerViewState();
+  State<HabitantQrScannerView> createState() => _HabitantQrScannerViewState();
 }
 
-class _QrScannerViewState extends State<QrScannerView> {
+class _HabitantQrScannerViewState extends State<HabitantQrScannerView> {
   final MobileScannerController _scannerController = MobileScannerController();
   bool _isProcessing = false;
   String? _errorMessage;
@@ -31,10 +31,9 @@ class _QrScannerViewState extends State<QrScannerView> {
     final rawValue = capture.barcodes
         .map((barcode) => barcode.rawValue)
         .whereType<String>()
-        .where((value) => value.trim().isNotEmpty)
-        .firstOrNull;
+        .firstWhere((value) => value.trim().isNotEmpty, orElse: () => '');
 
-    if (rawValue == null) return;
+    if (rawValue.isEmpty) return;
 
     setState(() {
       _isProcessing = true;
@@ -44,27 +43,26 @@ class _QrScannerViewState extends State<QrScannerView> {
     await _scannerController.stop();
 
     try {
-      final collector = await widget.loginController
-          .authenticateCollectorWithQrCode(rawValue);
+      final habitant = await widget.controller.findHabitantByQrCode(rawValue);
       if (!mounted) return;
 
-      if (collector == null) {
+      if (habitant == null) {
         setState(() {
           _isProcessing = false;
           _successMessage = null;
-          _errorMessage = 'QR Code invalide ou collecteur desactive.';
+          _errorMessage = 'QR Code invalide ou habitant introuvable.';
         });
         await _scannerController.start();
         return;
       }
 
       setState(() {
-        _successMessage = 'QR Code valide. Connexion autorisee.';
+        _successMessage = 'Habitant trouvé: ${habitant.fullName}';
         _errorMessage = null;
       });
       await Future<void>.delayed(const Duration(milliseconds: 550));
       if (!mounted) return;
-      Navigator.of(context).pop<AppUser>(collector);
+      Navigator.of(context).pop<AppUser>(habitant);
     } catch (error) {
       if (!mounted) return;
       setState(() {
@@ -83,7 +81,7 @@ class _QrScannerViewState extends State<QrScannerView> {
       appBar: AppBar(
         backgroundColor: const Color(0xFF101A31),
         foregroundColor: Colors.white,
-        title: const Text('Scanner QR Code'),
+        title: const Text('Scanner habitant'),
       ),
       body: Stack(
         children: [
@@ -134,7 +132,8 @@ class _QrScannerViewState extends State<QrScannerView> {
                             ),
                             SizedBox(width: 12),
                             Text(
-                              'Verification du collecteur...',
+                              "Recherche de l'habitant...",
+                              textAlign: TextAlign.center,
                               style: TextStyle(
                                 color: Colors.white,
                                 fontWeight: FontWeight.w700,
@@ -143,7 +142,7 @@ class _QrScannerViewState extends State<QrScannerView> {
                           ],
                         )
                       : const Text(
-                          'Placez le QR Code personnel du collecteur dans le cadre.',
+                          "Placez le QR Code de l'habitant dans le cadre.",
                           textAlign: TextAlign.center,
                           style: TextStyle(
                             color: Colors.white,

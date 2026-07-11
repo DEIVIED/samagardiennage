@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_core/firebase_core.dart';
 
+import 'services/firestore_service.dart';
 import 'views/login_view.dart';
 
 Future<void> main() async {
@@ -13,6 +14,9 @@ Future<void> main() async {
     FirebaseFirestore.instance.settings = const Settings(
       persistenceEnabled: true,
     );
+    final firestoreService = FirestoreService();
+    await firestoreService.seedDefaultCollectorUser();
+    await firestoreService.seedDefaultHabitantsAndPayments();
   } catch (error) {
     firebaseError = error;
   }

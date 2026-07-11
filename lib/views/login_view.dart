@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 
 import '../controllers/login_controller.dart';
-import '../models/collector.dart';
+import '../models/app_user.dart';
 import '../models/login_credentials.dart';
+import 'collector_dashboard_view.dart';
 import 'qr_scanner_view.dart';
 
 class LoginView extends StatefulWidget {
@@ -18,17 +19,20 @@ class _LoginViewState extends State<LoginView> {
   static const Color _navy = Color(0xFF172747);
   static const Color _gold = Color(0xFFF5A817);
   static const Color _surface = Color(0xFFF4F2EC);
+  static const Color _success = Color(0xFF2E8B57);
+  static const Color _danger = Color(0xFFD2473F);
 
   final LoginController _controller = LoginController();
   final TextEditingController _emailController = TextEditingController(
-    text: 'admin@sama-gardiennage.sn',
+    text: 'moussa@sama-gardiennage.sn',
   );
   final TextEditingController _passwordController = TextEditingController(
-    text: 'password',
+    text: '1234',
   );
 
   bool _isLoading = false;
-  bool _obscurePassword = true;
+  bool _obscurePin = true;
+  _LoginFeedbackData? _feedback;
 
   @override
   void dispose() {
@@ -37,36 +41,66 @@ class _LoginViewState extends State<LoginView> {
     super.dispose();
   }
 
-  Future<void> _submitAdminLogin() async {
+  void _openDashboard(AppUser user) {
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(builder: (_) => CollectorDashboardView(user: user)),
+    );
+  }
+
+  void _showFeedback({required String message, required bool isSuccess}) {
+    setState(() {
+      _feedback = _LoginFeedbackData(message: message, isSuccess: isSuccess);
+    });
+  }
+
+  Future<void> _submitLogin() async {
     final messenger = ScaffoldMessenger.of(context);
     if (widget.firebaseError != null) {
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text(
-            'Firebase non configuré: ${widget.firebaseError.toString()}',
-          ),
-        ),
+      _showFeedback(
+        message: 'Firebase non configure. Verifiez google-services.json.',
+        isSuccess: false,
       );
       return;
     }
 
-    setState(() => _isLoading = true);
+    setState(() {
+      _isLoading = true;
+      _feedback = null;
+    });
 
     final credentials = LoginCredentials(
       email: _emailController.text,
-      password: _passwordController.text,
+      pin: _passwordController.text,
     );
-    final result = await _controller.loginAdmin(credentials);
+    final result = await _controller.loginWithEmailAndPin(credentials);
 
     if (!mounted) return;
     setState(() => _isLoading = false);
+    if (result.isSuccess && result.user != null) {
+      _showFeedback(
+        message: 'Connexion reussie. Bienvenue ${result.user!.fullName}.',
+        isSuccess: true,
+      );
+      messenger.showSnackBar(
+        SnackBar(
+          backgroundColor: _success,
+          content: Text('Connexion reussie: ${result.user!.fullName}'),
+        ),
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 650));
+      if (!mounted) return;
+      _openDashboard(result.user!);
+      return;
+    }
+
+    _showFeedback(
+      message: result.message ?? 'Connexion impossible.',
+      isSuccess: false,
+    );
     messenger.showSnackBar(
       SnackBar(
-        content: Text(
-          result.isSuccess
-              ? 'Connexion administrateur en cours...'
-              : result.message ?? 'Connexion impossible.',
-        ),
+        backgroundColor: _danger,
+        content: Text(result.message ?? 'Connexion impossible.'),
       ),
     );
   }
@@ -74,27 +108,35 @@ class _LoginViewState extends State<LoginView> {
   Future<void> _scanQrCode() async {
     final messenger = ScaffoldMessenger.of(context);
     if (widget.firebaseError != null) {
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text(
-            'Firebase non configuré: ${widget.firebaseError.toString()}',
-          ),
-        ),
+      _showFeedback(
+        message: 'Firebase non configure. Le scan QR est indisponible.',
+        isSuccess: false,
       );
       return;
     }
 
-    final collector = await Navigator.of(context).push<Collector>(
+    setState(() => _feedback = null);
+    final user = await Navigator.of(context).push<AppUser>(
       MaterialPageRoute(
         builder: (_) => QrScannerView(loginController: _controller),
       ),
     );
 
     if (!mounted) return;
-    if (collector != null) {
-      messenger.showSnackBar(
-        SnackBar(content: Text('Bienvenue ${collector.fullName}')),
+    if (user != null) {
+      _showFeedback(
+        message: 'QR Code valide. Bienvenue ${user.fullName}.',
+        isSuccess: true,
       );
+      messenger.showSnackBar(
+        SnackBar(
+          backgroundColor: _success,
+          content: Text('QR Code valide: ${user.fullName}'),
+        ),
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 650));
+      if (!mounted) return;
+      _openDashboard(user);
     }
   }
 
@@ -118,7 +160,7 @@ class _LoginViewState extends State<LoginView> {
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
                           const Text(
-                            'CONNEXION ADMINISTRATEUR',
+                            'CONNEXION UTILISATEUR',
                             style: TextStyle(
                               color: Color(0xFF566073),
                               fontSize: 11,
@@ -127,6 +169,10 @@ class _LoginViewState extends State<LoginView> {
                             ),
                           ),
                           const SizedBox(height: 22),
+                          if (_feedback != null) ...[
+                            _LoginFeedback(data: _feedback!),
+                            const SizedBox(height: 18),
+                          ],
                           _LabeledField(
                             label: 'Adresse email',
                             controller: _emailController,
@@ -134,20 +180,18 @@ class _LoginViewState extends State<LoginView> {
                           ),
                           const SizedBox(height: 18),
                           _LabeledField(
-                            label: 'Mot de passe',
+                            label: 'PIN',
                             controller: _passwordController,
-                            obscureText: _obscurePassword,
+                            obscureText: _obscurePin,
                             suffixIcon: IconButton(
-                              tooltip: _obscurePassword
-                                  ? 'Afficher le mot de passe'
-                                  : 'Masquer le mot de passe',
+                              tooltip: _obscurePin
+                                  ? 'Afficher le PIN'
+                                  : 'Masquer le PIN',
                               onPressed: () {
-                                setState(
-                                  () => _obscurePassword = !_obscurePassword,
-                                );
+                                setState(() => _obscurePin = !_obscurePin);
                               },
                               icon: Icon(
-                                _obscurePassword
+                                _obscurePin
                                     ? Icons.visibility_off_outlined
                                     : Icons.visibility_outlined,
                                 size: 18,
@@ -164,7 +208,7 @@ class _LoginViewState extends State<LoginView> {
                                 borderRadius: BorderRadius.circular(14),
                               ),
                             ),
-                            onPressed: _isLoading ? null : _submitAdminLogin,
+                            onPressed: _isLoading ? null : _submitLogin,
                             child: _isLoading
                                 ? const SizedBox.square(
                                     dimension: 18,
@@ -219,6 +263,56 @@ class _LoginViewState extends State<LoginView> {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _LoginFeedbackData {
+  const _LoginFeedbackData({required this.message, required this.isSuccess});
+
+  final String message;
+  final bool isSuccess;
+}
+
+class _LoginFeedback extends StatelessWidget {
+  const _LoginFeedback({required this.data});
+
+  final _LoginFeedbackData data;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = data.isSuccess
+        ? _LoginViewState._success
+        : _LoginViewState._danger;
+    final icon = data.isSuccess
+        ? Icons.check_circle_outline
+        : Icons.error_outline;
+
+    return Container(
+      padding: const EdgeInsets.all(13),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.10),
+        border: Border.all(color: color.withValues(alpha: 0.28)),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, color: color, size: 19),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              data.message,
+              style: TextStyle(
+                color: color,
+                fontSize: 12,
+                fontWeight: FontWeight.w800,
+                height: 1.25,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
