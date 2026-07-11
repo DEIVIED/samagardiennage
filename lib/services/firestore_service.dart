@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'dart:async';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/app_user.dart';
@@ -18,6 +19,11 @@ class FirestoreService {
 
   FirebaseFirestore get _firestore =>
       _firestoreOverride ?? FirebaseFirestore.instance;
+
+  // Broadcast stream to notify listeners of data changes (payments/habitants).
+  static final StreamController<void> _changesController =
+      StreamController<void>.broadcast();
+  static Stream<void> get changes => _changesController.stream;
 
   Future<UserCredential> signInFirebaseAdmin({
     required String email,
@@ -64,7 +70,7 @@ class FirestoreService {
     // lorsqu'on relance l'application.
     final alreadySeeded = await _firestore
         .collection(_paymentCollection)
-        .doc('payment_amadou_juillet')
+        .doc('payment_habitant_amadou_juillet')
         .get();
     if (alreadySeeded.exists) return;
 
@@ -146,20 +152,16 @@ class FirestoreService {
 
     final batch = _firestore.batch();
     for (final habitant in habitants) {
-      batch.set(
-        _firestore.collection('users').doc(habitant.id),
-        {
-          ...habitant.toFirestore(),
-          'createdAt': FieldValue.serverTimestamp(),
-          'seededAt': FieldValue.serverTimestamp(),
-        },
-        SetOptions(merge: true),
-      );
+      batch.set(_firestore.collection('users').doc(habitant.id), {
+        ...habitant.toFirestore(),
+        'createdAt': FieldValue.serverTimestamp(),
+        'seededAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
     }
 
     final payments = <PaymentRecord>[
       PaymentRecord(
-        id: 'payment_amadou_juillet',
+        id: 'payment_habitant_amadou_juillet',
         habitantId: 'habitant_amadou_diallo',
         amount: 2000,
         month: 7,
@@ -170,7 +172,7 @@ class FirestoreService {
         receiptNumber: 'REC-2026-0001',
       ),
       PaymentRecord(
-        id: 'payment_amadou_juin',
+        id: 'payment_habitant_amadou_juin',
         habitantId: 'habitant_amadou_diallo',
         amount: 2000,
         month: 6,
@@ -181,7 +183,7 @@ class FirestoreService {
         receiptNumber: 'REC-2026-0002',
       ),
       const PaymentRecord(
-        id: 'payment_fatou_juillet',
+        id: 'payment_habitant_fatou_juillet',
         habitantId: 'habitant_fatou_ndiaye',
         amount: 2000,
         month: 7,
@@ -189,7 +191,7 @@ class FirestoreService {
         status: 'impaye',
       ),
       PaymentRecord(
-        id: 'payment_ibrahima_juillet',
+        id: 'payment_habitant_ibrahima_juillet',
         habitantId: 'habitant_ibrahima_sow',
         amount: 2000,
         month: 7,
@@ -200,7 +202,7 @@ class FirestoreService {
         receiptNumber: 'REC-2026-0003',
       ),
       const PaymentRecord(
-        id: 'payment_mariama_juillet',
+        id: 'payment_habitant_mariama_juillet',
         habitantId: 'habitant_mariama_bah',
         amount: 2000,
         month: 7,
@@ -208,7 +210,7 @@ class FirestoreService {
         status: 'impaye',
       ),
       PaymentRecord(
-        id: 'payment_ousmane_juillet',
+        id: 'payment_habitant_ousmane_juillet',
         habitantId: 'habitant_ousmane_sarr',
         amount: 2000,
         month: 7,
@@ -219,7 +221,7 @@ class FirestoreService {
         receiptNumber: 'REC-2026-0004',
       ),
       PaymentRecord(
-        id: 'payment_aissatou_juillet',
+        id: 'payment_habitant_aissatou_juillet',
         habitantId: 'habitant_aissatou_diop',
         amount: 2000,
         month: 7,
@@ -234,10 +236,7 @@ class FirestoreService {
     for (final payment in payments) {
       batch.set(
         _firestore.collection(_paymentCollection).doc(payment.id),
-        {
-          ...payment.toFirestore(),
-          'seededAt': FieldValue.serverTimestamp(),
-        },
+        {...payment.toFirestore(), 'seededAt': FieldValue.serverTimestamp()},
         SetOptions(merge: true),
       );
     }
@@ -246,13 +245,18 @@ class FirestoreService {
   }
 
   Future<void> savePaymentRecord(PaymentRecord payment) {
-    return _firestore.collection(_paymentCollection).doc(payment.id).set(
-      {
-        ...payment.toFirestore(),
-        'createdAt': FieldValue.serverTimestamp(),
-      },
-      SetOptions(merge: true),
-    );
+    return _savePaymentInternal(payment);
+  }
+
+  Future<void> _savePaymentInternal(PaymentRecord payment) async {
+    await _firestore.collection(_paymentCollection).doc(payment.id).set({
+      ...payment.toFirestore(),
+      'createdAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+    // Notify listeners that data changed (e.g., a payment was recorded).
+    try {
+      _changesController.add(null);
+    } catch (_) {}
   }
 
   Future<void> createHabitant(AppUser habitant) {

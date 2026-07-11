@@ -1,137 +1,205 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 
+import '../controllers/habitants_controller.dart';
 import '../models/app_user.dart';
+import '../models/payment_record.dart';
 import 'habitants_view.dart';
 import 'payment_history_view.dart';
 import 'statistics_view.dart';
 
-class CollectorDashboardView extends StatelessWidget {
+class CollectorDashboardView extends StatefulWidget {
   const CollectorDashboardView({super.key, required this.user});
 
   final AppUser user;
 
-  void _openHabitants(BuildContext context) {
-    Navigator.of(
-      context,
-    ).push(MaterialPageRoute(builder: (_) => HabitantsView(user: user)));
-  }
+  @override
+  State<CollectorDashboardView> createState() => _CollectorDashboardViewState();
+}
 
-  void _openStatistics(BuildContext context) {
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => StatisticsView(user: user)),
-    );
-  }
-
+class _CollectorDashboardViewState extends State<CollectorDashboardView> {
   static const Color _navy = Color(0xFF172747);
   static const Color _gold = Color(0xFFF5A817);
   static const Color _surface = Color(0xFFF4F2EC);
   static const Color _green = Color(0xFF7DBA8D);
+
+  final HabitantsController _controller = HabitantsController();
+  late Future<_DashboardData> _dashboardFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _dashboardFuture = _loadDashboardData();
+  }
+
+  Future<_DashboardData> _loadDashboardData() async {
+    final results = await Future.wait([
+      _controller.fetchPaymentsForYear(DateTime.now().year),
+      _controller.fetchHabitants(),
+    ]);
+
+    return _DashboardData(
+      payments: results[0] as List<PaymentRecord>,
+      habitants: results[1] as List<AppUser>,
+    );
+  }
+
+  void _openHabitants(BuildContext context) {
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => HabitantsView(user: widget.user)));
+  }
+
+  void _openStatistics(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => StatisticsView(user: widget.user)),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: _navy,
       body: SafeArea(
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 430),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(34),
-              child: Container(
-                color: _surface,
-                child: Column(
-                  children: [
-                    Expanded(
-                      child: SingleChildScrollView(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            _Header(user: user),
-                            Padding(
-                              padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.stretch,
-                                children: [
-                                  const Row(
-                                    children: [
-                                      Expanded(
-                                        child: _MetricCard(
-                                          title: 'COLLECTE',
-                                          value: '44 500',
-                                          subtitle: 'F CFA',
-                                          valueColor: _navy,
+        child: FutureBuilder<_DashboardData>(
+          future: _dashboardFuture,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState != ConnectionState.done) {
+              return const Center(
+                child: CircularProgressIndicator(color: _gold),
+              );
+            }
+
+            if (snapshot.hasError) {
+              return Center(
+                child: Text('Chargement impossible : ${snapshot.error}'),
+              );
+            }
+
+            final data = snapshot.data ?? _DashboardData.empty();
+            final totalCollected = data.payments
+                .where((payment) => payment.status.toLowerCase() != 'impaye')
+                .fold<int>(0, (sum, payment) => sum + payment.amount);
+            final paidHabitants = data.payments
+                .where((payment) => payment.status.toLowerCase() == 'paye')
+                .map((payment) => payment.habitantId)
+                .toSet()
+                .length;
+            final totalHabitants = data.habitants.length;
+            final currentMonth = DateTime.now().month;
+            final expectedTotal = totalHabitants * 2000 * currentMonth;
+            final progress = expectedTotal > 0
+                ? (totalCollected / expectedTotal).clamp(0.0, 1.0)
+                : 0.0;
+
+            return Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 430),
+                child: Container(
+                  color: _surface,
+                  child: Column(
+                    children: [
+                      Expanded(
+                        child: SingleChildScrollView(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              _Header(user: widget.user),
+                              Padding(
+                                padding: const EdgeInsets.fromLTRB(
+                                  20,
+                                  14,
+                                  20,
+                                  0,
+                                ),
+                                child: Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.stretch,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Expanded(
+                                          child: _MetricCard(
+                                            title: 'COLLECTE',
+                                            value: '$totalCollected',
+                                            subtitle: 'F CFA',
+                                            valueColor: _navy,
+                                          ),
                                         ),
-                                      ),
-                                      SizedBox(width: 12),
-                                      Expanded(
-                                        child: _MetricCard(
-                                          title: 'HABITANTS',
-                                          value: '20/26',
-                                          subtitle: 'payes',
-                                          valueColor: _gold,
+                                        const SizedBox(width: 12),
+                                        Expanded(
+                                          child: _MetricCard(
+                                            title: 'HABITANTS',
+                                            value:
+                                                '$paidHabitants/$totalHabitants',
+                                            subtitle: 'payés',
+                                            valueColor: _gold,
+                                          ),
                                         ),
-                                      ),
-                                    ],
-                                  ),
-                                  const SizedBox(height: 14),
-                                  const _ProgressCard(),
-                                  const SizedBox(height: 18),
-                                  const Text(
-                                    'ACTIONS RAPIDES',
-                                    style: TextStyle(
-                                      color: Color(0xFF7B8290),
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w900,
+                                      ],
                                     ),
-                                  ),
-                                  const SizedBox(height: 10),
-                                  GridView.count(
-                                    crossAxisCount: 2,
-                                    shrinkWrap: true,
-                                    physics:
-                                        const NeverScrollableScrollPhysics(),
-                                    mainAxisSpacing: 12,
-                                    crossAxisSpacing: 12,
-                                    childAspectRatio: 2.8,
-                                    children: [
-                                      _ActionTile(
-                                        icon: Icons.payments_outlined,
-                                        label: 'Nouveau\nPaiement',
-                                        color: _gold,
-                                        onTap: () => _openHabitants(context),
+                                    const SizedBox(height: 14),
+                                    _ProgressCard(
+                                      progress: progress,
+                                      expectedTotal: expectedTotal,
+                                    ),
+                                    const SizedBox(height: 18),
+                                    const Text(
+                                      'ACTIONS RAPIDES',
+                                      style: TextStyle(
+                                        color: Color(0xFF7B8290),
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w900,
                                       ),
-                                      _ActionTile(
-                                        icon: Icons.groups_2_outlined,
-                                        label: 'Habitants',
-                                        color: const Color(0xFF8C96A6),
-                                        onTap: () => _openHabitants(context),
-                                      ),
-                                      const _ActionTile(
-                                        icon: Icons.receipt_long_outlined,
-                                        label: 'Recus',
-                                        color: Color(0xFF8793CA),
-                                      ),
-                                      _ActionTile(
-                                        icon: Icons.bar_chart_rounded,
-                                        label: 'Statistiques',
-                                        color: _green,
-                                        onTap: () => _openStatistics(context),
-                                      ),
-                                    ],
-                                  ),
-                                ],
+                                    ),
+                                    const SizedBox(height: 10),
+                                    GridView.count(
+                                      crossAxisCount: 2,
+                                      shrinkWrap: true,
+                                      physics:
+                                          const NeverScrollableScrollPhysics(),
+                                      mainAxisSpacing: 12,
+                                      crossAxisSpacing: 12,
+                                      childAspectRatio: 2.8,
+                                      children: [
+                                        _ActionTile(
+                                          icon: Icons.payments_outlined,
+                                          label: 'Nouveau\nPaiement',
+                                          color: _gold,
+                                          onTap: () => _openHabitants(context),
+                                        ),
+                                        _ActionTile(
+                                          icon: Icons.groups_2_outlined,
+                                          label: 'Habitants',
+                                          color: const Color(0xFF8C96A6),
+                                          onTap: () => _openHabitants(context),
+                                        ),
+                                        const _ActionTile(
+                                          icon: Icons.receipt_long_outlined,
+                                          label: 'Recus',
+                                          color: Color(0xFF8793CA),
+                                        ),
+                                        _ActionTile(
+                                          icon: Icons.bar_chart_rounded,
+                                          label: 'Statistiques',
+                                          color: _green,
+                                          onTap: () => _openStatistics(context),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                ),
                               ),
-                            ),
-                          ],
+                            ],
+                          ),
                         ),
                       ),
-                    ),
-                    _BottomNavigation(user: user),
-                  ],
+                      _BottomNavigation(user: widget.user),
+                    ],
+                  ),
                 ),
               ),
-            ),
-          ),
+            );
+          },
         ),
       ),
     );
@@ -148,11 +216,7 @@ class _Header extends StatelessWidget {
     return Container(
       height: 138,
       decoration: const BoxDecoration(
-        color: CollectorDashboardView._navy,
-        borderRadius: BorderRadius.only(
-          bottomLeft: Radius.circular(22),
-          bottomRight: Radius.circular(22),
-        ),
+        color: _CollectorDashboardViewState._navy,
       ),
       child: Stack(
         children: [
@@ -166,7 +230,7 @@ class _Header extends StatelessWidget {
                 height: 24,
                 decoration: BoxDecoration(
                   color: const Color(0xFF0D1B36),
-                  borderRadius: BorderRadius.circular(16),
+                  borderRadius: BorderRadius.zero,
                 ),
               ),
             ),
@@ -251,7 +315,7 @@ class _Header extends StatelessWidget {
                         width: 8,
                         height: 8,
                         decoration: const BoxDecoration(
-                          color: CollectorDashboardView._gold,
+                          color: _CollectorDashboardViewState._gold,
                           shape: BoxShape.circle,
                         ),
                       ),
@@ -261,7 +325,7 @@ class _Header extends StatelessWidget {
                 const SizedBox(width: 10),
                 CircleAvatar(
                   radius: 17,
-                  backgroundColor: CollectorDashboardView._gold,
+                  backgroundColor: _CollectorDashboardViewState._gold,
                   child: Text(
                     _initials(user.fullName),
                     style: const TextStyle(
@@ -355,7 +419,10 @@ class _MetricCard extends StatelessWidget {
 }
 
 class _ProgressCard extends StatelessWidget {
-  const _ProgressCard();
+  const _ProgressCard({required this.progress, required this.expectedTotal});
+
+  final double progress;
+  final int expectedTotal;
 
   @override
   Widget build(BuildContext context) {
@@ -368,9 +435,9 @@ class _ProgressCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Row(
+          Row(
             children: [
-              Expanded(
+              const Expanded(
                 child: Text(
                   'Progression mensuelle',
                   style: TextStyle(
@@ -381,9 +448,9 @@ class _ProgressCard extends StatelessWidget {
                 ),
               ),
               Text(
-                '77%',
-                style: TextStyle(
-                  color: CollectorDashboardView._gold,
+                '${(progress * 100).round()}%',
+                style: const TextStyle(
+                  color: _CollectorDashboardViewState._gold,
                   fontSize: 12,
                   fontWeight: FontWeight.w900,
                 ),
@@ -395,17 +462,17 @@ class _ProgressCard extends StatelessWidget {
             borderRadius: BorderRadius.circular(20),
             child: LinearProgressIndicator(
               minHeight: 8,
-              value: 0.77,
+              value: progress,
               backgroundColor: const Color(0xFFE8E5DE),
               valueColor: const AlwaysStoppedAnimation<Color>(
-                CollectorDashboardView._navy,
+                _CollectorDashboardViewState._navy,
               ),
             ),
           ),
           const SizedBox(height: 9),
-          const Row(
+          Row(
             children: [
-              Text(
+              const Text(
                 '0 F CFA',
                 style: TextStyle(
                   color: Color(0xFF9AA0AA),
@@ -413,10 +480,10 @@ class _ProgressCard extends StatelessWidget {
                   fontWeight: FontWeight.w700,
                 ),
               ),
-              Spacer(),
+              const Spacer(),
               Text(
-                '57 500 F CFA',
-                style: TextStyle(
+                '$expectedTotal F CFA',
+                style: const TextStyle(
                   color: Color(0xFF9AA0AA),
                   fontSize: 10,
                   fontWeight: FontWeight.w700,
@@ -428,6 +495,16 @@ class _ProgressCard extends StatelessWidget {
       ),
     );
   }
+}
+
+class _DashboardData {
+  const _DashboardData({required this.payments, required this.habitants});
+
+  factory _DashboardData.empty() =>
+      const _DashboardData(payments: [], habitants: []);
+
+  final List<PaymentRecord> payments;
+  final List<AppUser> habitants;
 }
 
 class _ActionTile extends StatelessWidget {
@@ -506,9 +583,9 @@ class _BottomNavigation extends StatelessWidget {
           _NavItem(
             icon: Icons.groups_2_outlined,
             label: 'Habitants',
-            onTap: () => Navigator.of(
-              context,
-            ).push(MaterialPageRoute(builder: (_) => HabitantsView(user: user))),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => HabitantsView(user: user)),
+            ),
           ),
           _NavItem(
             icon: Icons.credit_card_outlined,
@@ -546,7 +623,7 @@ class _NavItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final color = isActive
-        ? CollectorDashboardView._gold
+        ? _CollectorDashboardViewState._gold
         : const Color(0xFF748092);
 
     return GestureDetector(

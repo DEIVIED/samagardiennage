@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../controllers/habitants_controller.dart';
 import '../models/app_user.dart';
 import '../models/payment_record.dart';
+import '../services/firestore_service.dart';
 import 'collector_dashboard_view.dart';
 import 'habitant_detail_view.dart';
 import 'habitant_creation_view.dart';
@@ -31,6 +33,7 @@ class _HabitantsViewState extends State<HabitantsView> {
   final HabitantsController _controller = HabitantsController();
   final TextEditingController _searchController = TextEditingController();
   late Future<_HabitantsPageData> _pageDataFuture;
+  StreamSubscription<void>? _changesSub;
   HabitantFilter _filter = HabitantFilter.all;
   String _query = '';
 
@@ -38,10 +41,14 @@ class _HabitantsViewState extends State<HabitantsView> {
   void initState() {
     super.initState();
     _pageDataFuture = _loadPageData();
+    _changesSub = FirestoreService.changes.listen((_) {
+      if (mounted) setState(() => _pageDataFuture = _loadPageData());
+    });
   }
 
   @override
   void dispose() {
+    _changesSub?.cancel();
     _searchController.dispose();
     super.dispose();
   }
@@ -83,7 +90,7 @@ class _HabitantsViewState extends State<HabitantsView> {
   ]) async {
     if (widget.user == null) return;
 
-    await Navigator.of(context).push(
+    final payment = await Navigator.of(context).push<PaymentRecord>(
       MaterialPageRoute(
         builder: (_) => PaymentView(
           habitant: habitant,
@@ -91,23 +98,25 @@ class _HabitantsViewState extends State<HabitantsView> {
           paymentHistory: history,
           onPaymentConfirmed: (payment) async {
             await _controller.savePayment(payment);
-            if (!mounted) return;
-            Navigator.of(context).pushReplacement(
-              MaterialPageRoute(
-                builder: (_) => ReceiptView(
-                  habitant: habitant,
-                  collector: widget.user!,
-                  payment: payment,
-                ),
-              ),
-            );
           },
         ),
       ),
     );
-    if (mounted) {
-      setState(() => _pageDataFuture = _loadPageData());
-    }
+
+    if (!mounted || payment == null) return;
+
+    // Recharger immédiatement les statuts et l'historique après l'encaissement.
+    setState(() => _pageDataFuture = _loadPageData());
+
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ReceiptView(
+          habitant: habitant,
+          collector: widget.user!,
+          payment: payment,
+        ),
+      ),
+    );
   }
 
   Future<void> _openScan() async {
@@ -131,9 +140,7 @@ class _HabitantsViewState extends State<HabitantsView> {
         builder: (_) => HabitantDetailView(
           habitant: habitant,
           paymentHistory: history,
-          onPayNow: widget.user != null
-              ? () => _openPayment(habitant, history)
-              : null,
+          onPayNow: widget.user != null ? () => _openPayment(habitant) : null,
         ),
       ),
     );
@@ -161,97 +168,95 @@ class _HabitantsViewState extends State<HabitantsView> {
         child: Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 430),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(34),
-              child: Container(
-                color: _surface,
-                child: Column(
-                  children: [
-                    _Header(
-                      searchController: _searchController,
-                      user: widget.user,
-                      onChanged: (value) {
-                        setState(() => _query = value.trim());
-                      },
-                      onScanRequested: widget.user != null ? _openScan : null,
-                    ),
-                    Expanded(
-                      child: FutureBuilder<_HabitantsPageData>(
-                        future: _pageDataFuture,
-                        builder: (context, snapshot) {
-                          if (snapshot.connectionState !=
-                              ConnectionState.done) {
-                            return const Center(
-                              child: CircularProgressIndicator(color: _gold),
-                            );
-                          }
-
-                          if (snapshot.hasError) {
-                            return _EmptyState(
-                              icon: Icons.error_outline,
-                              title: 'Chargement impossible',
-                              message: snapshot.error.toString(),
-                            );
-                          }
-
-                          final data =
-                              snapshot.data ?? _HabitantsPageData.empty();
-                          final habitants = _filteredHabitants(data);
-                          return Column(
-                            children: [
-                              _FilterBar(
-                                selectedFilter: _filter,
-                                onChanged: (filter) {
-                                  setState(() => _filter = filter);
-                                },
-                              ),
-                              Expanded(
-                                child: habitants.isEmpty
-                                    ? const _EmptyState(
-                                        icon: Icons.groups_2_outlined,
-                                        title: 'Aucun habitant',
-                                        message:
-                                            'Aucun resultat ne correspond a votre recherche.',
-                                      )
-                                    : ListView.separated(
-                                        padding: const EdgeInsets.fromLTRB(
-                                          18,
-                                          12,
-                                          18,
-                                          18,
-                                        ),
-                                        itemBuilder: (context, index) {
-                                          final habitant = habitants[index];
-                                          final history =
-                                              data.historyByHabitant[habitant
-                                                  .id] ??
-                                              const <PaymentRecord>[];
-                                          final latest = data.latestPaymentFor(
-                                            habitant.id,
-                                          );
-                                          return _HabitantTile(
-                                            habitant: habitant,
-                                            payment: latest,
-                                            onTap: () =>
-                                                _openDetail(habitant, history),
-                                            onPaymentTap: widget.user != null
-                                                ? () => _openPayment(habitant, history)
-                                                : null,
-                                          );
-                                        },
-                                        separatorBuilder: (_, __) =>
-                                            const SizedBox(height: 10),
-                                        itemCount: habitants.length,
-                                      ),
-                              ),
-                            ],
+            child: Container(
+              color: _surface,
+              child: Column(
+                children: [
+                  _Header(
+                    searchController: _searchController,
+                    user: widget.user,
+                    onChanged: (value) {
+                      setState(() => _query = value.trim());
+                    },
+                  ),
+                  Expanded(
+                    child: FutureBuilder<_HabitantsPageData>(
+                      future: _pageDataFuture,
+                      builder: (context, snapshot) {
+                        if (snapshot.connectionState != ConnectionState.done) {
+                          return const Center(
+                            child: CircularProgressIndicator(color: _gold),
                           );
-                        },
-                      ),
+                        }
+
+                        if (snapshot.hasError) {
+                          return _EmptyState(
+                            icon: Icons.error_outline,
+                            title: 'Chargement impossible',
+                            message: snapshot.error.toString(),
+                          );
+                        }
+
+                        final data =
+                            snapshot.data ?? _HabitantsPageData.empty();
+                        final habitants = _filteredHabitants(data);
+                        return Column(
+                          children: [
+                            _FilterBar(
+                              selectedFilter: _filter,
+                              onChanged: (filter) {
+                                setState(() => _filter = filter);
+                              },
+                            ),
+                            Expanded(
+                              child: habitants.isEmpty
+                                  ? const _EmptyState(
+                                      icon: Icons.groups_2_outlined,
+                                      title: 'Aucun habitant',
+                                      message:
+                                          'Aucun resultat ne correspond a votre recherche.',
+                                    )
+                                  : ListView.separated(
+                                      padding: const EdgeInsets.fromLTRB(
+                                        18,
+                                        12,
+                                        18,
+                                        18,
+                                      ),
+                                      itemBuilder: (context, index) {
+                                        final habitant = habitants[index];
+                                        final history =
+                                            data.historyByHabitant[habitant
+                                                .id] ??
+                                            const <PaymentRecord>[];
+                                        final latest = data.latestPaymentFor(
+                                          habitant.id,
+                                        );
+                                        return _HabitantTile(
+                                          habitant: habitant,
+                                          payment: latest,
+                                          onTap: () =>
+                                              _openDetail(habitant, history),
+                                          onPaymentTap: widget.user != null
+                                              ? () => _openPayment(
+                                                  habitant,
+                                                  history,
+                                                )
+                                              : null,
+                                        );
+                                      },
+                                      separatorBuilder: (_, __) =>
+                                          const SizedBox(height: 10),
+                                      itemCount: habitants.length,
+                                    ),
+                            ),
+                          ],
+                        );
+                      },
                     ),
-                    _BottomNavigation(user: widget.user),
-                  ],
-                ),
+                  ),
+                  _BottomNavigation(user: widget.user),
+                ],
               ),
             ),
           ),
@@ -260,12 +265,27 @@ class _HabitantsViewState extends State<HabitantsView> {
       floatingActionButton: Padding(
         // Le bouton est volontairement remonté pour ne jamais recouvrir Stats.
         padding: const EdgeInsets.only(bottom: 70),
-        child: FloatingActionButton.small(
-          backgroundColor: _gold,
-          foregroundColor: _navy,
-          onPressed: _openCreateHabitant,
-          tooltip: 'Ajouter un habitant',
-          child: const Icon(Icons.person_add_alt_1_outlined),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            FloatingActionButton.small(
+              heroTag: 'scan-habitant',
+              backgroundColor: _navy,
+              foregroundColor: Colors.white,
+              onPressed: widget.user == null ? null : _openScan,
+              tooltip: 'Scanner un habitant pour payer',
+              child: const Icon(Icons.qr_code_scanner_rounded),
+            ),
+            const SizedBox(width: 12),
+            FloatingActionButton.small(
+              heroTag: 'ajouter-habitant',
+              backgroundColor: _gold,
+              foregroundColor: _navy,
+              onPressed: _openCreateHabitant,
+              tooltip: 'Ajouter un habitant',
+              child: const Icon(Icons.person_add_alt_1_outlined),
+            ),
+          ],
         ),
       ),
     );
@@ -277,36 +297,19 @@ class _Header extends StatelessWidget {
     required this.searchController,
     required this.onChanged,
     this.user,
-    this.onScanRequested,
   });
 
   final TextEditingController searchController;
   final ValueChanged<String> onChanged;
   final AppUser? user;
-  final VoidCallback? onScanRequested;
 
   @override
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.fromLTRB(18, 10, 18, 16),
-      decoration: const BoxDecoration(
-        color: _HabitantsViewState._navy,
-        borderRadius: BorderRadius.only(
-          bottomLeft: Radius.circular(22),
-          bottomRight: Radius.circular(22),
-        ),
-      ),
+      decoration: const BoxDecoration(color: _HabitantsViewState._navy),
       child: Column(
         children: [
-          Container(
-            width: 118,
-            height: 24,
-            decoration: BoxDecoration(
-              color: const Color(0xFF0D1B36),
-              borderRadius: BorderRadius.circular(16),
-            ),
-          ),
-          const SizedBox(height: 16),
           Row(
             children: [
               IconButton(
@@ -336,24 +339,6 @@ class _Header extends StatelessWidget {
                   style: TextStyle(
                     color: Colors.white,
                     fontSize: 18,
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-              ),
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 5,
-                ),
-                decoration: BoxDecoration(
-                  color: _HabitantsViewState._gold,
-                  borderRadius: BorderRadius.circular(18),
-                ),
-                child: const Text(
-                  '26 total',
-                  style: TextStyle(
-                    color: Color(0xFF2B230E),
-                    fontSize: 9,
                     fontWeight: FontWeight.w900,
                   ),
                 ),

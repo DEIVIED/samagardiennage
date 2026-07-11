@@ -1,9 +1,12 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 
+import '../controllers/habitants_controller.dart';
 import '../models/app_user.dart';
 import '../models/payment_record.dart';
+import '../services/firestore_service.dart';
 
-class HabitantDetailView extends StatelessWidget {
+class HabitantDetailView extends StatefulWidget {
   const HabitantDetailView({
     super.key,
     required this.habitant,
@@ -13,103 +16,154 @@ class HabitantDetailView extends StatelessWidget {
 
   final AppUser habitant;
   final List<PaymentRecord> paymentHistory;
-  final VoidCallback? onPayNow;
+  final Future<void> Function()? onPayNow;
 
   static const Color _navy = Color(0xFF172747);
   static const Color _gold = Color(0xFFF5A817);
   static const Color _surface = Color(0xFFF4F2EC);
 
   @override
-  Widget build(BuildContext context) {
-    final totalPaid = paymentHistory
-        .where((payment) => payment.status.toLowerCase() != 'impaye')
-        .fold<int>(0, (sum, payment) => sum + payment.amount);
+  State<HabitantDetailView> createState() => _HabitantDetailViewState();
+}
 
-    return Scaffold(
-      backgroundColor: _navy,
-      body: SafeArea(
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 430),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(34),
-              child: Container(
-                color: _surface,
-                child: Column(
-                  children: [
-                    _Header(habitant: habitant),
-                    Expanded(
-                      child: SingleChildScrollView(
-                        padding: const EdgeInsets.fromLTRB(18, 16, 18, 22),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: _SummaryCard(
-                                    title: 'TOTAL PAYE',
-                                    value: '$totalPaid',
-                                    subtitle: 'F CFA',
-                                    color: const Color(0xFF2E8B57),
+class _HabitantDetailViewState extends State<HabitantDetailView> {
+  final _controller = HabitantsController();
+  late Future<List<PaymentRecord>> _history = Future.value(
+    widget.paymentHistory,
+  );
+  bool _isPaying = false;
+  StreamSubscription<void>? _changesSub;
+
+  Future<void> _payNow() async {
+    if (_isPaying || widget.onPayNow == null) return;
+    setState(() => _isPaying = true);
+    try {
+      await widget.onPayNow!();
+      if (mounted) {
+        setState(
+          () => _history = _controller.fetchPaymentHistory(widget.habitant.id),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isPaying = false);
+    }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _changesSub = FirestoreService.changes.listen((_) {
+      if (mounted)
+        setState(
+          () => _history = _controller.fetchPaymentHistory(widget.habitant.id),
+        );
+    });
+  }
+
+  @override
+  void dispose() {
+    _changesSub?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<List<PaymentRecord>>(
+      future: _history,
+      builder: (context, snapshot) {
+        final paymentHistory = snapshot.data ?? widget.paymentHistory;
+        final totalPaid = paymentHistory
+            .where((payment) => payment.status.toLowerCase() != 'impaye')
+            .fold<int>(0, (sum, payment) => sum + payment.amount);
+
+        return Scaffold(
+          backgroundColor: HabitantDetailView._navy,
+          body: SafeArea(
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 430),
+                child: Container(
+                  color: HabitantDetailView._surface,
+                  child: Column(
+                    children: [
+                      _Header(habitant: widget.habitant),
+                      Expanded(
+                        child: SingleChildScrollView(
+                          padding: const EdgeInsets.fromLTRB(18, 16, 18, 22),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: _SummaryCard(
+                                      title: 'TOTAL PAYE',
+                                      value: '$totalPaid',
+                                      subtitle: 'F CFA',
+                                      color: const Color(0xFF2E8B57),
+                                    ),
                                   ),
-                                ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: _SummaryCard(
-                                    title: 'HISTORIQUE',
-                                    value: '${paymentHistory.length}',
-                                    subtitle: 'paiements',
-                                    color: _gold,
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: _SummaryCard(
+                                      title: 'HISTORIQUE',
+                                      value: '${paymentHistory.length}',
+                                      subtitle: 'paiements',
+                                      color: HabitantDetailView._gold,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 16),
+                              _InfoCard(habitant: widget.habitant),
+                              if (widget.onPayNow != null) ...[
+                                const SizedBox(height: 16),
+                                FilledButton(
+                                  style: FilledButton.styleFrom(
+                                    backgroundColor: HabitantDetailView._gold,
+                                    foregroundColor: HabitantDetailView._navy,
+                                    minimumSize: const Size.fromHeight(46),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(14),
+                                    ),
+                                  ),
+                                  onPressed: _isPaying ? null : _payNow,
+                                  child: Text(
+                                    _isPaying
+                                        ? 'Mise à jour...'
+                                        : 'Enregistrer un nouveau paiement',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.w900,
+                                    ),
                                   ),
                                 ),
                               ],
-                            ),
-                            const SizedBox(height: 16),
-                            _InfoCard(habitant: habitant),
-                            if (onPayNow != null) ...[
-                              const SizedBox(height: 16),
-                              FilledButton(
-                                style: FilledButton.styleFrom(
-                                  backgroundColor: _gold,
-                                  foregroundColor: _navy,
-                                  minimumSize: const Size.fromHeight(46),
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(14),
-                                  ),
-                                ),
-                                onPressed: onPayNow,
-                                child: const Text(
-                                  'Enregistrer un nouveau paiement',
-                                  style: TextStyle(fontWeight: FontWeight.w900),
+                              const SizedBox(height: 18),
+                              const Text(
+                                'HISTORIQUE DES PAIEMENTS',
+                                style: TextStyle(
+                                  color: Color(0xFF7B8290),
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w900,
                                 ),
                               ),
+                              const SizedBox(height: 10),
+                              if (paymentHistory.isEmpty)
+                                const _EmptyHistory()
+                              else
+                                ...paymentHistory.map(_PaymentHistoryTile.new),
                             ],
-                            const SizedBox(height: 18),
-                            const Text(
-                              'HISTORIQUE DES PAIEMENTS',
-                              style: TextStyle(
-                                color: Color(0xFF7B8290),
-                                fontSize: 11,
-                                fontWeight: FontWeight.w900,
-                              ),
-                            ),
-                            const SizedBox(height: 10),
-                            if (paymentHistory.isEmpty)
-                              const _EmptyHistory()
-                            else
-                              ...paymentHistory.map(_PaymentHistoryTile.new),
-                          ],
+                          ),
                         ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 }
@@ -123,13 +177,7 @@ class _Header extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.fromLTRB(18, 10, 18, 20),
-      decoration: const BoxDecoration(
-        color: HabitantDetailView._navy,
-        borderRadius: BorderRadius.only(
-          bottomLeft: Radius.circular(22),
-          bottomRight: Radius.circular(22),
-        ),
-      ),
+      decoration: const BoxDecoration(color: HabitantDetailView._navy),
       child: Column(
         children: [
           Container(
@@ -137,7 +185,7 @@ class _Header extends StatelessWidget {
             height: 24,
             decoration: BoxDecoration(
               color: const Color(0xFF0D1B36),
-              borderRadius: BorderRadius.circular(16),
+              borderRadius: BorderRadius.zero,
             ),
           ),
           const SizedBox(height: 14),
